@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import LabeledPrice, PreCheckoutQuery
 
 # Твій токен від BotFather
-TOKEN = os.getenv("9226561529:AAHVyFL7c4wZX2Rw8Av5F8abAoX7oHRP9Sc")
+TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
