@@ -97,9 +97,9 @@ async def handle_messages(message: types.Message):
         # Зашиваємо ID відправника прямо у payload: reveal_ID_ЧАС
         payment_key = f"reveal_{user_id}_{int(time.time())}"
         
-        # Кнопка для купівлі підказки (1 зірка для тесту)
+        # Кнопка для купівлі підказки (100 зірка для тесту)
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="🕵️ Дізнатися відправника (1 ⭐️)", callback_data=payment_key)]
+            [types.InlineKeyboardButton(text="🕵️ Дізнатися відправника (100 ⭐️)", callback_data=payment_key)]
         ])
         
         try:
