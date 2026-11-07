@@ -14,8 +14,9 @@ dp = Dispatcher()
 # Твій адміністративний Telegram ID
 ADMIN_ID = 8904909598
 
-# Словник для тимчасового відстеження активного діалогу (кому пишемо анонімку)
-user_states = {}
+# Словники для станів
+user_states = {}       # Для анонімних діалогів
+admin_broadcast = set() # Множина для адмінів, які зараз вводять текст розсилки
 
 
 # ─── 0. РОБОТА З БАЗОЮ ДАНИХ (SQLite) ──────────────────────────────────
@@ -26,7 +27,6 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Таблиця користувачів
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -36,7 +36,6 @@ def init_db():
         )
     """)
     
-    # Таблиця успішних платежів Stars
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,6 +84,24 @@ def get_stats():
     conn.close()
     return total_users, total_stars
 
+def get_recent_users(limit=5):
+    """Отримує список останніх зареєстрованих користувачів."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, username, first_name, created_at FROM users ORDER BY created_at DESC LIMIT ?", (limit,))
+    users = cursor.fetchall()
+    conn.close()
+    return users
+
+def get_all_user_ids():
+    """Отримує список усіх ID користувачів для розсилки."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users")
+    users = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return users
+
 
 # ─── 1. КОМАНДА /start ──────────────────────────────────────────────────
 @dp.message(Command("start"))
@@ -93,7 +110,6 @@ async def cmd_start(message: types.Message):
     username = message.from_user.username or ""
     first_name = message.from_user.first_name or ""
     
-    # Зберігаємо користувача у базі даних
     register_user(user_id, username, first_name)
     
     args = message.text.split()
@@ -157,26 +173,110 @@ async def cmd_help(message: types.Message):
     )
 
 
-# ─── 4. КОМАНДА /stats (Тільки для адміністратора) ───────────────────────
-@dp.message(Command("stats"))
-async def cmd_stats(message: types.Message):
+# ─── 4. АДМІН-ПАНЕЛЬ (/admin або /stats) ────────────────────────────────
+@dp.message(Command("admin", "stats"))
+async def cmd_admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("❌ У вас немає доступу до цієї команди.")
         return
 
     total_users, total_stars = get_stats()
+    
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📊 Загальна статистика", callback_data="admin_stats")],
+        [types.InlineKeyboardButton(text="👥 Останні користувачі", callback_data="admin_users")],
+        [types.InlineKeyboardButton(text="📢 Зробити розсилку", callback_data="admin_broadcast")]
+    ])
+
     await message.answer(
-        f"📊 <b>Статистика бота:</b>\n\n"
+        f"👑 <b>Панель адміністратора</b>\n\n"
         f"👥 Загалом користувачів: <b>{total_users}</b>\n"
-        f"⭐️ Зароблено зірок: <b>{total_stars} ⭐️</b>",
+        f"⭐️ Зароблено зірок: <b>{total_stars} ⭐️</b>\n\n"
+        f"Обери потрібний розділ нижче:",
+        reply_markup=keyboard,
         parse_mode="HTML"
     )
+
+
+# ─── ОБРОБНИК КНОПОК АДМІН-ПАНЕЛІ ────────────────────────────────────────
+@dp.callback_query(lambda c: c.data.startswith("admin_"))
+async def process_admin_callbacks(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Немає прав!", show_alert=True)
+        return
+
+    action = callback_query.data
+
+    if action == "admin_stats":
+        total_users, total_stars = get_stats()
+        back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="🔙 Назад до меню", callback_data="admin_menu")]
+        ])
+        await callback_query.message.edit_text(
+            f"📊 <b>Детальна статистика:</b>\n\n"
+            f"👥 Усього користувачів у базі: <b>{total_users}</b>\n"
+            f"⭐️ Зароблено зірок (XTR): <b>{total_stars} ⭐️</b>",
+            reply_markup=back_kb,
+            parse_mode="HTML"
+        )
+        await callback_query.answer()
+
+    elif action == "admin_users":
+        recent = get_recent_users(5)
+        users_text = ""
+        for u in recent:
+            uid, uname, fname, cat = u
+            username_str = f"@{uname}" if uname else "немає"
+            users_text += f"• <b>{fname}</b> ({username_str}) — <code>{uid}</code>\n"
+        
+        if not users_text:
+            users_text = "Поки що немає зареєстрованих користувачів."
+
+        back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="🔙 Назад до меню", callback_data="admin_menu")]
+        ])
+        await callback_query.message.edit_text(
+            f"👥 <b>Останні 5 користувачів:</b>\n\n{users_text}",
+            reply_markup=back_kb,
+            parse_mode="HTML"
+        )
+        await callback_query.answer()
+
+    elif action == "admin_broadcast":
+        admin_broadcast.add(ADMIN_ID)
+        back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="❌ Скасувати", callback_data="admin_menu")]
+        ])
+        await callback_query.message.edit_text(
+            "📢 <b>Режим розсилки</b>\n\n"
+            "Надішли мені наступним повідомленням текст (або фото з текстом), який хочеш розіслати всім користувачам бота.",
+            reply_markup=back_kb,
+            parse_mode="HTML"
+        )
+        await callback_query.answer()
+
+    elif action == "admin_menu":
+        admin_broadcast.discard(ADMIN_ID)
+        total_users, total_stars = get_stats()
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📊 Загальна статистика", callback_data="admin_stats")],
+            [types.InlineKeyboardButton(text="👥 Останні користувачі", callback_data="admin_users")],
+            [types.InlineKeyboardButton(text="📢 Зробити розсилку", callback_data="admin_broadcast")]
+        ])
+        await callback_query.message.edit_text(
+            f"👑 <b>Панель адміністратора</b>\n\n"
+            f"👥 Загалом користувачів: <b>{total_users}</b>\n"
+            f"⭐️ Зароблено зірок: <b>{total_stars} ⭐️</b>\n\n"
+            f"Обери потрібний розділ нижче:",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        await callback_query.answer()
 
 
 # ─── 5. УСПІШНА ОПЛАТА ──────────────────────────────────────────────────
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: types.Message):
-    # Записуємо платіж (100 зірок) у базу даних
     log_payment(message.from_user.id, 100)
     
     payment_payload = message.successful_payment.invoice_payload
@@ -220,6 +320,26 @@ async def handle_messages(message: types.Message):
     user_id = message.from_user.id
     text = message.text
 
+    # Перевірка: чи робить адмін розсилку прямо зараз
+    if user_id == ADMIN_ID and user_id in admin_broadcast:
+        admin_broadcast.discard(ADMIN_ID)
+        user_ids = get_all_user_ids()
+        
+        sent_count = 0
+        await message.answer(f"🚀 Починаю розсилку для {len(user_ids)} користувачів...")
+        
+        for uid in user_ids:
+            try:
+                await bot.send_message(uid, text)
+                sent_count += 1
+                await asyncio.sleep(0.05) # Невелика затримка проти обмежень Telegram
+            except Exception:
+                pass
+                
+        await message.answer(f"✅ <b>Розсилку завершено!</b>\nУспішно надіслано: {sent_count}/{len(user_ids)}", parse_mode="HTML")
+        return
+
+    # Звичайне анонімне повідомлення
     if user_id in user_states:
         target_id = user_states[user_id]
         payment_key = f"reveal_{user_id}_{int(time.time())}"
@@ -275,8 +395,8 @@ async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
 
 # ─── 8. ГОЛОВНИЙ ЗАПУСК ──────────────────────────────────────────────────
 async def main():
-    init_db()  # Ініціалізація SQLite при запуску
-    print("Бот запущено, базу даних підключено!")
+    init_db()
+    print("Бот запущено, базу даних та адмін-панель підключено!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
