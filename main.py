@@ -129,7 +129,7 @@ async def process_buy_hint(callback_query: types.CallbackQuery):
     await bot.send_invoice(
         chat_id=callback_query.from_user.id,
         title="🕵️ Хто надіслав анонімку?",
-        description="Купи підказку за 1 зірку, щоб дізнатися ім'я та юзернейм того, хто написав це повідомлення.",
+        description="Купи підказку за 100 зірку, щоб дізнатися ім'я та юзернейм того, хто написав це повідомлення.",
         payload=payment_key,
         currency="XTR",
         prices=prices
