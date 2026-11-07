@@ -124,7 +124,7 @@ async def handle_messages(message: types.Message):
 @dp.callback_query(lambda c: c.data.startswith("reveal_"))
 async def process_buy_hint(callback_query: types.CallbackQuery):
     payment_key = callback_query.data
-    prices = [LabeledPrice(label="Розкрити відправника", amount=1)]
+    prices = [LabeledPrice(label="Розкрити відправника", amount=100)]
     
     await bot.send_invoice(
         chat_id=callback_query.from_user.id,
