@@ -2,6 +2,7 @@ import asyncio
 import time
 import os
 import sqlite3
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import LabeledPrice, PreCheckoutQuery
@@ -15,7 +16,7 @@ dp = Dispatcher()
 ADMIN_ID = 8904909598
 
 # Словники для станів
-user_states = {}       # Для анонімних діалогів
+user_states = {}        # Для анонімних діалогів
 admin_broadcast = set() # Множина для адмінів, які зараз вводять текст розсилки
 
 
@@ -393,10 +394,29 @@ async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
 
 
-# ─── 8. ГОЛОВНИЙ ЗАПУСК ──────────────────────────────────────────────────
+# ─── 8. ВЕБ-СЕРВЕР ДЛЯ ПІНГІВ (щоб Render не спав) ─────────────────────────
+async def handle_ping(request):
+    return web.Response(text="Bot is alive!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+
+# ─── 9. ГОЛОВНИЙ ЗАПУСК ──────────────────────────────────────────────────
 async def main():
     init_db()
     print("Бот запущено, базу даних та адмін-панель підключено!")
+    
+    # Запускаємо веб-сервер для пінгів у фоні
+    await start_web_server()
+    
+    # Запускаємо бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
