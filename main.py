@@ -5,7 +5,6 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import LabeledPrice, PreCheckoutQuery
 
-# Твій токен від BotFather
 TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=TOKEN)
@@ -19,7 +18,10 @@ user_states = {}
 async def cmd_start(message: types.Message):
     args = message.text.split()
     user_id = message.from_user.id
-    bot_username = "super_anon_q_a_bot"  # наприклад: my_anon_bot
+    
+    # Динамічно отримуємо юзернейм нашого бота
+    bot_info = await bot.get_me()
+    bot_username = bot_info.username
     
     if len(args) > 1:
         target_id = args[1]
@@ -47,7 +49,7 @@ async def cmd_start(message: types.Message):
         parse_mode="HTML"
     )
 
-# 2. Успішна оплата (ВАЖЛИВО: цей обробник тепер стоїть ВИЩЕ за загальний @dp.message())
+# 2. Успішна оплата
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: types.Message):
     payment_payload = message.successful_payment.invoice_payload
@@ -85,7 +87,7 @@ async def process_successful_payment(message: types.Message):
     else:
         await message.answer("🎉 Успішно! Зірки зараховано на баланс бота, але не вдалося зчитати дані відправника з чека.")
 
-# 3. Обробник надсилання анонімки (загальний текстовий обробник)
+# 3. Обробник надсилання анонімки
 @dp.message()
 async def handle_messages(message: types.Message):
     user_id = message.from_user.id
@@ -94,10 +96,8 @@ async def handle_messages(message: types.Message):
     if user_id in user_states:
         target_id = user_states[user_id]
         
-        # Зашиваємо ID відправника прямо у payload: reveal_ID_ЧАС
         payment_key = f"reveal_{user_id}_{int(time.time())}"
         
-        # Кнопка для купівлі підказки (100 зірка для тесту)
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="🕵️ Дізнатися відправника (100 ⭐️)", callback_data=payment_key)]
         ])
@@ -118,9 +118,15 @@ async def handle_messages(message: types.Message):
             
         del user_states[user_id]
     else:
-        await message.answer("Привіт! Скористайся своїм посиланням із команди /start, щоб отримувати анонімні запитання.")
+        bot_info = await bot.get_me()
+        personal_link = f"https://t.me/{bot_info.username}?start={user_id}"
+        await message.answer(
+            f"Привіт! Скористайся своїм анонімним посиланням, щоб отримувати запитання:\n"
+            f"<code>{personal_link}</code>",
+            parse_mode="HTML"
+        )
 
-# 4. Натискання на кнопку купівлі -> виставлення рахунку в Stars (1 зірка)
+# 4. Натискання на кнопку купівлі -> виставлення рахунку в Stars
 @dp.callback_query(lambda c: c.data.startswith("reveal_"))
 async def process_buy_hint(callback_query: types.CallbackQuery):
     payment_key = callback_query.data
@@ -129,7 +135,7 @@ async def process_buy_hint(callback_query: types.CallbackQuery):
     await bot.send_invoice(
         chat_id=callback_query.from_user.id,
         title="🕵️ Хто надіслав анонімку?",
-        description="Купи підказку за 100 зірку, щоб дізнатися ім'я та юзернейм того, хто написав це повідомлення.",
+        description="Купи підказку за 100 зірок, щоб дізнатися ім'я та юзернейм того, хто написав це повідомлення.",
         payload=payment_key,
         currency="XTR",
         prices=prices
